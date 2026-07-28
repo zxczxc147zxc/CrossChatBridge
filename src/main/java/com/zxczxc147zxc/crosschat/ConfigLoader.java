@@ -3,6 +3,8 @@ package com.zxczxc147zxc.crosschat;
 import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.Properties;
 
 public class ConfigLoader {
@@ -74,7 +76,8 @@ public class ConfigLoader {
                 props.setProperty("host.ip", "127.0.0.1");
                 props.setProperty("host.port", "52134");
                 props.setProperty("host.listen_port", "52134");
-                props.store(writer, "CrossChat Config");
+                props.setProperty("secret", "123456");
+                props.store(writer, "CrossChat Config\n# 如果通过公共互联网使用，请将其更改为强密码以防止未经授权的连接");
             }
         } catch (IOException e) {
             throw new RuntimeException("Failed to create default config", e);
@@ -99,5 +102,20 @@ public class ConfigLoader {
 
     public static int getListenPort() {
         return Integer.parseInt(props.getProperty("host.listen_port", "52134"));
+    }
+
+    public static String getSecretHash() {
+        String secret = props.getProperty("secret", "123456");
+        try {
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            byte[] hash = md.digest(secret.getBytes(StandardCharsets.UTF_8));
+            StringBuilder hex = new StringBuilder();
+            for (byte b : hash) {
+                hex.append(String.format("%02x", b));
+            }
+            return hex.toString();
+        } catch (NoSuchAlgorithmException e) {
+            throw new RuntimeException(e);
+        }
     }
 }

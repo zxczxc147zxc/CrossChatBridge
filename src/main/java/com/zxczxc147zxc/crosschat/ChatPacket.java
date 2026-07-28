@@ -14,6 +14,7 @@ public class ChatPacket {
     private String player;
     private String msg;
     private String formatted;
+    private String key;
 
     public ChatPacket() {}
 
@@ -34,6 +35,8 @@ public class ChatPacket {
     public void setMsg(String msg) { this.msg = msg; }
     public String getFormatted() { return formatted; }
     public void setFormatted(String formatted) { this.formatted = formatted; }
+    public String getKey() { return key; }
+    public void setKey(String key) { this.key = key; }
 
     public String getFormattedMessage() {
         if (formatted != null) return formatted;

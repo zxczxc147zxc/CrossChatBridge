@@ -76,6 +76,11 @@ public class NetworkManager {
             if (!ChatPacket.TYPE_REGISTER.equals(register.getType())) return;
 
             String serverName = register.getServer();
+            if (!ConfigLoader.getSecretHash().equals(register.getKey())) {
+                System.err.println("[CrossChatBridge] Rejected connection from " + socket.getRemoteSocketAddress() + ": invalid key");
+                try { socket.close(); } catch (IOException ignored) {}
+                return;
+            }
             clientWriters.put(serverName, writer);
             writerToServer.put(writer, serverName);
             System.out.println("[CrossChatBridge] Registered: " + serverName);
@@ -125,6 +130,7 @@ public class NetworkManager {
             BufferedReader reader = new BufferedReader(new InputStreamReader(clientSocket.getInputStream(), StandardCharsets.UTF_8));
 
             ChatPacket reg = new ChatPacket(ChatPacket.TYPE_REGISTER, ConfigLoader.getServerName(), null, null);
+            reg.setKey(ConfigLoader.getSecretHash());
             writer.write(reg.toJson());
             writer.flush();
             clientWriter = writer;
