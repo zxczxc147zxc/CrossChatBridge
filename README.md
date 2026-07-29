@@ -17,9 +17,38 @@
 
 ---
 
-## 安装与使用
+## 构建并使用
 
-1. 将模组 JAR 文件放入所有需要互联的服务端的 `mods` 文件夹中。
+### 1. 环境要求
+
+- **JDK 25** 或更高版本[reference:0]
+- **Git**（用于克隆代码）
+
+### 2. 克隆项目
+
+```bash
+git clone https://github.com/zxczxc147zxc/CrossChatBridge.git
+cd CrossChatBridge
+```
+
+### 3. 构建模组 JAR
+
+项目使用 **Gradle** 作为构建工具，并集成了 **Fabric Loom** 插件[reference:1]。在项目根目录下执行：
+
+- **Windows (使用 Gradle Wrapper)**:
+  ```bash
+  gradlew build
+  ```
+- **macOS / Linux (使用 Gradle Wrapper)**:
+  ```bash
+  ./gradlew build
+  ```
+
+构建成功后，生成的模组 JAR 文件位于 `build/libs/` 目录下，文件名格式为 `CrossChatBridge-<version>.jar`[reference:2]。
+
+### 4. 部署到服务器
+
+1. 将构建好的模组 JAR 文件放入所有需要互联的服务端的 `mods` 文件夹中。
 2. 启动服务器，模组会自动生成默认配置文件 `config/crosschat.properties`。
 3. 根据你的网络架构修改配置：
    - **指定一台服务器作为 HOST**：将其 `server.mode=HOST`。
