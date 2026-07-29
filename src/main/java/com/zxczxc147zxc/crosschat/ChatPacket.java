@@ -6,6 +6,7 @@ public class ChatPacket {
     public static final String TYPE_REGISTER = "REGISTER";
     public static final String TYPE_CHAT = "CHAT";
     public static final String TYPE_BROADCAST = "BROADCAST";
+    public static final String TYPE_PLAYER_UPDATE = "PLAYER_UPDATE";
 
     private static final Gson GSON = new Gson();
 
@@ -15,6 +16,7 @@ public class ChatPacket {
     private String msg;
     private String formatted;
     private String key;
+    private java.util.List<String> playerList;
 
     public ChatPacket() {}
 
@@ -37,6 +39,8 @@ public class ChatPacket {
     public void setFormatted(String formatted) { this.formatted = formatted; }
     public String getKey() { return key; }
     public void setKey(String key) { this.key = key; }
+    public java.util.List<String> getPlayerList() { return playerList; }
+    public void setPlayerList(java.util.List<String> playerList) { this.playerList = playerList; }
 
     public String getFormattedMessage() {
         if (formatted != null) return formatted;

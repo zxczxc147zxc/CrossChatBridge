@@ -9,6 +9,7 @@ import java.net.*;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.*;
 import java.util.*;
+import java.util.stream.Collectors;
 
 public class NetworkManager {
     private static ServerSocket serverSocket;
@@ -24,6 +25,8 @@ public class NetworkManager {
 
     private static final Map<String, PrintWriter> clientWriters = new ConcurrentHashMap<>();
     private static final Map<PrintWriter, String> writerToServer = new ConcurrentHashMap<>();
+    private static final Map<String, List<String>> remotePlayerLists = new ConcurrentHashMap<>();
+
     private static volatile boolean running = true;
     private static volatile MinecraftServer serverInstance;
 
@@ -95,6 +98,9 @@ public class NetworkManager {
                         String formatted = p.getFormattedMessage();
                         server.execute(() -> server.getPlayerList().broadcastSystemMessage(Component.literal(formatted), false));
                     }
+                } else if (ChatPacket.TYPE_PLAYER_UPDATE.equals(p.getType())) {
+                    remotePlayerLists.put(serverName, p.getPlayerList() != null ? p.getPlayerList() : Collections.emptyList());
+                    invalidateServerStatus();
                 }
             }
         } catch (IOException e) {
@@ -104,6 +110,8 @@ public class NetworkManager {
                 String name = writerToServer.remove(writer);
                 if (name != null) {
                     clientWriters.remove(name);
+                    remotePlayerLists.remove(name);
+                    invalidateServerStatus();
                     System.out.println("[CrossChatBridge] Disconnected: " + name);
                 }
             }
@@ -154,6 +162,8 @@ public class NetworkManager {
             readerThread.setDaemon(true);
             readerThread.start();
 
+            sendPlayerUpdate();
+
         } catch (IOException e) {
             if (running) {
                 System.err.println("[CrossChatBridge] Failed to connect to host, retrying in 5s...");
@@ -166,6 +176,39 @@ public class NetworkManager {
         if (clientWriter != null) {
             clientWriter.write(packet.toJson());
             clientWriter.flush();
+        }
+    }
+
+    public static void sendPlayerUpdate() {
+        if (!ConfigLoader.isPlayerListSyncEnabled()) return;
+        MinecraftServer server = serverInstance;
+        if (server == null) return;
+
+        List<String> names = server.getPlayerList().getPlayers().stream()
+            .map(p -> p.getName().getString())
+            .collect(Collectors.toList());
+
+        ChatPacket packet = new ChatPacket();
+        packet.setType(ChatPacket.TYPE_PLAYER_UPDATE);
+        packet.setServer(ConfigLoader.getServerName());
+        packet.setPlayerList(names);
+
+        if (ConfigLoader.isHost()) {
+            remotePlayerLists.put(ConfigLoader.getServerName(), names);
+            invalidateServerStatus();
+        } else {
+            sendToHost(packet);
+        }
+    }
+
+    public static Map<String, List<String>> getRemotePlayerLists() {
+        return Collections.unmodifiableMap(remotePlayerLists);
+    }
+
+    private static void invalidateServerStatus() {
+        MinecraftServer server = serverInstance;
+        if (server != null) {
+            server.invalidateStatus();
         }
     }
 

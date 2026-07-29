@@ -2,6 +2,7 @@ package com.zxczxc147zxc.crosschat;
 
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerEntityEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.message.v1.ServerMessageEvents;
 import net.minecraft.network.chat.Component;
@@ -16,7 +17,10 @@ public class CrossChatMod implements ModInitializer {
     public void onInitialize() {
         ConfigLoader.load();
 
-        ServerLifecycleEvents.SERVER_STARTED.register(s -> server = s);
+        ServerLifecycleEvents.SERVER_STARTED.register(s -> {
+            server = s;
+            NetworkManager.sendPlayerUpdate();
+        });
         ServerLifecycleEvents.SERVER_STOPPING.register(s -> NetworkManager.shutdown());
 
         if (ConfigLoader.isHost()) {
@@ -54,6 +58,13 @@ public class CrossChatMod implements ModInitializer {
                 )
             )
         );
+
+        ServerEntityEvents.ENTITY_LOAD.register((entity, world) -> {
+            if (entity instanceof net.minecraft.server.level.ServerPlayer) NetworkManager.sendPlayerUpdate();
+        });
+        ServerEntityEvents.ENTITY_UNLOAD.register((entity, world) -> {
+            if (entity instanceof net.minecraft.server.level.ServerPlayer) NetworkManager.sendPlayerUpdate();
+        });
 
         Runtime.getRuntime().addShutdownHook(new Thread(NetworkManager::shutdown));
     }

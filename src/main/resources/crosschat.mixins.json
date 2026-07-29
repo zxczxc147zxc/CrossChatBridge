@@ -1,0 +1,12 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "com.zxczxc147zxc.crosschat.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "server": [
+    "ServerStatusMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

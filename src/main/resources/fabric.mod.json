@@ -13,6 +13,9 @@
       "com.zxczxc147zxc.crosschat.CrossChatMod"
     ]
   },
+  "mixins": [
+    "crosschat.mixins.json"
+  ],
   "depends": {
     "fabricloader": "*",
     "minecraft": "26.*",
