@@ -64,12 +64,14 @@ cd CrossChatBridge
 
 | 配置项 | 说明 | 默认值 |
 |--------|------|--------|
-| `server.name` | 本服务器的名称，将作为消息前缀显示在聊天中 | `MyServer` |
-| `server.mode` | 运行模式：`HOST` 或 `CLIENT` | `CLIENT` |
-| `host.ip` | HOST 服务器的 IP 地址（CLIENT 模式使用） | `127.0.0.1` |
-| `host.port` | HOST 服务器的监听端口（CLIENT 连接此端口） | `52134` |
-| `host.listen_port` | HOST 实际绑定的本地端口（通常与 `host.port` 保持一致） | `52134` |
-| `secret` | 共享密钥，所有服务器必须一致，用于身份验证 | `123456`（**请务必修改！**） |
+| server.name | 本服务器的名称，将作为消息前缀显示在聊天中 | MyServer |
+| server.mode | 运行模式：HOST 或 CLIENT | CLIENT |
+| host.ip | HOST 服务器的 IP 地址（CLIENT 模式使用） | 127.0.0.1 |
+| host.port | HOST 服务器的监听端口（CLIENT 连接此端口） | 52134 |
+| host.listen_port | HOST 实际绑定的本地端口（通常与 host.port 保持一致） | 52134 |
+| secret | 共享密钥，所有服务器必须一致，用于身份验证 | 123456 |
+| sync.playerlist.enabled | 是否在外部服务器列表中显示子服玩家 | true |
+| sync.tablist.enabled | 是否在主服 Tab 列表中显示子服玩家 | true |
 
 > **提示**：
 > - `server.name` 支持 Minecraft 颜色代码（如 `§cMyServer§r`），客户端会自动解析显示。
