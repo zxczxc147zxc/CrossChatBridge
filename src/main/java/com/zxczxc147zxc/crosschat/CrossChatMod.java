@@ -2,7 +2,7 @@ package com.zxczxc147zxc.crosschat;
 
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
-import net.fabricmc.fabric.api.event.lifecycle.v1.ServerEntityEvents;
+import net.fabricmc.fabric.api.entity.event.v1.ServerPlayerEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.message.v1.ServerMessageEvents;
 import net.minecraft.network.chat.Component;
@@ -59,11 +59,16 @@ public class CrossChatMod implements ModInitializer {
             )
         );
 
-        ServerEntityEvents.ENTITY_LOAD.register((entity, world) -> {
-            if (entity instanceof net.minecraft.server.level.ServerPlayer) NetworkManager.sendPlayerUpdate();
+        ServerPlayerEvents.JOIN.register(player -> {
+            NetworkManager.addLocalPlayer(player.getName().getString());
+            NetworkManager.sendPlayerUpdate();
+            if (ConfigLoader.isHost() && ConfigLoader.isTabListSyncEnabled()) {
+                NetworkManager.sendVirtualPlayersTo(player);
+            }
         });
-        ServerEntityEvents.ENTITY_UNLOAD.register((entity, world) -> {
-            if (entity instanceof net.minecraft.server.level.ServerPlayer) NetworkManager.sendPlayerUpdate();
+        ServerPlayerEvents.LEAVE.register(player -> {
+            NetworkManager.removeLocalPlayer(player.getName().getString());
+            NetworkManager.sendPlayerUpdate();
         });
 
         Runtime.getRuntime().addShutdownHook(new Thread(NetworkManager::shutdown));

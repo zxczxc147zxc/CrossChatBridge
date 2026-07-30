@@ -78,6 +78,7 @@ public class ConfigLoader {
                 props.setProperty("host.listen_port", "52134");
                 props.setProperty("secret", "123456");
                 props.setProperty("sync.playerlist.enabled", "true");
+                props.setProperty("sync.tablist.enabled", "true");
                 props.store(writer, "CrossChat Config\n# 如果通过公共互联网使用，请将其更改为强密码以防止未经授权的连接");
             }
         } catch (IOException e) {
@@ -107,6 +108,10 @@ public class ConfigLoader {
 
     public static boolean isPlayerListSyncEnabled() {
         return Boolean.parseBoolean(props.getProperty("sync.playerlist.enabled", "true"));
+    }
+
+    public static boolean isTabListSyncEnabled() {
+        return Boolean.parseBoolean(props.getProperty("sync.tablist.enabled", "true"));
     }
 
     public static String getSecretHash() {
