@@ -7,6 +7,9 @@ public class ChatPacket {
     public static final String TYPE_CHAT = "CHAT";
     public static final String TYPE_BROADCAST = "BROADCAST";
     public static final String TYPE_PLAYER_UPDATE = "PLAYER_UPDATE";
+    public static final String TYPE_HELLO = "HELLO";
+    public static final String TYPE_CHALLENGE = "CHALLENGE";
+    public static final String TYPE_AUTH = "AUTH";
 
     private static final Gson GSON = new Gson();
 

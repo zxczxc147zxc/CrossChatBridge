@@ -1,6 +1,7 @@
 package com.zxczxc147zxc.crosschat;
 
 import com.mojang.authlib.GameProfile;
+import com.zxczxc147zxc.crosschat.mixin.ClientboundPlayerInfoUpdatePacketAccessor;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.protocol.game.ClientboundPlayerInfoRemovePacket;
@@ -12,6 +13,8 @@ import net.minecraft.world.level.GameType;
 import java.io.*;
 import java.net.*;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.concurrent.*;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -67,16 +70,28 @@ public class NetworkManager {
         return UUID.nameUUIDFromBytes(("remote:" + serverName + ":" + playerName).getBytes(StandardCharsets.UTF_8));
     }
 
+    private static String sha256Concat(String a, String b) {
+        try {
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            md.update(a.getBytes(StandardCharsets.UTF_8));
+            md.update(b.getBytes(StandardCharsets.UTF_8));
+            byte[] hash = md.digest();
+            StringBuilder hex = new StringBuilder();
+            for (byte bb : hash) {
+                hex.append(String.format("%02x", bb));
+            }
+            return hex.toString();
+        } catch (NoSuchAlgorithmException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
     private static volatile boolean running = true;
     private static volatile MinecraftServer serverInstance;
 
     static {
-        ServerLifecycleEvents.SERVER_STARTED.register(server -> {
-            serverInstance = server;
-        });
-        ServerLifecycleEvents.SERVER_STOPPING.register(server -> {
-            serverInstance = null;
-        });
+        ServerLifecycleEvents.SERVER_STARTED.register(server -> serverInstance = server);
+        ServerLifecycleEvents.SERVER_STOPPING.register(server -> serverInstance = null);
     }
 
     public static void startServer() {
@@ -110,20 +125,42 @@ public class NetworkManager {
     private static void handleClient(Socket socket) {
         PrintWriter writer = null;
         try {
+            socket.setSoTimeout(10000);
             BufferedReader reader = new BufferedReader(new InputStreamReader(socket.getInputStream(), StandardCharsets.UTF_8));
             writer = new PrintWriter(new OutputStreamWriter(socket.getOutputStream(), StandardCharsets.UTF_8), true);
 
             String firstLine = reader.readLine();
-            if (firstLine == null) return;
-            ChatPacket register = ChatPacket.fromJson(firstLine);
-            if (!ChatPacket.TYPE_REGISTER.equals(register.getType())) return;
-
-            String serverName = register.getServer();
-            if (!ConfigLoader.getSecretHash().equals(register.getKey())) {
-                System.err.println("[CrossChatBridge] Rejected connection from " + socket.getRemoteSocketAddress() + ": invalid key");
-                try { socket.close(); } catch (IOException ignored) {}
-                return;
+            if (firstLine == null) { socket.close(); return; }
+            ChatPacket hello = ChatPacket.fromJson(firstLine);
+            if (!ChatPacket.TYPE_HELLO.equals(hello.getType())) {
+                System.err.println("[CrossChatBridge] Rejected: expected HELLO, got " + hello.getType());
+                socket.close(); return;
             }
+            String serverName = hello.getServer();
+            if (serverName == null || serverName.isEmpty()) { socket.close(); return; }
+
+            String nonce = UUID.randomUUID().toString().replace("-", "").substring(0, 16);
+            ChatPacket challenge = new ChatPacket();
+            challenge.setType(ChatPacket.TYPE_CHALLENGE);
+            challenge.setKey(nonce);
+            writer.write(challenge.toJson());
+            writer.flush();
+
+            String authLine = reader.readLine();
+            if (authLine == null) { socket.close(); return; }
+            ChatPacket auth = ChatPacket.fromJson(authLine);
+            if (!ChatPacket.TYPE_AUTH.equals(auth.getType())) {
+                System.err.println("[CrossChatBridge] Rejected: expected AUTH, got " + auth.getType());
+                socket.close(); return;
+            }
+
+            String expected = sha256Concat(ConfigLoader.getSecretHash(), nonce);
+            if (!expected.equals(auth.getKey())) {
+                System.err.println("[CrossChatBridge] Auth failed for " + serverName + " from " + socket.getRemoteSocketAddress());
+                socket.close(); return;
+            }
+
+            socket.setSoTimeout(0);
             clientWriters.put(serverName, writer);
             writerToServer.put(writer, serverName);
             System.out.println("[CrossChatBridge] Registered: " + serverName);
@@ -131,16 +168,18 @@ public class NetworkManager {
             String line;
             while ((line = reader.readLine()) != null) {
                 ChatPacket p = ChatPacket.fromJson(line);
+
                 if (ChatPacket.TYPE_CHAT.equals(p.getType())) {
-                    broadcastToClients(p);
+                    ChatPacket trusted = new ChatPacket(ChatPacket.TYPE_BROADCAST, p.getServer(), p.getPlayer(), p.getMsg());
+                    trusted.setFormatted("[" + p.getServer() + "]<" + p.getPlayer() + ">" + p.getMsg());
+                    broadcastToClients(trusted);
                     MinecraftServer server = serverInstance;
                     if (server != null) {
-                        String formatted = p.getFormattedMessage();
+                        String formatted = trusted.getFormattedMessage();
                         server.execute(() -> server.getPlayerList().broadcastSystemMessage(Component.literal(formatted), false));
                     }
                 } else if (ChatPacket.TYPE_PLAYER_UPDATE.equals(p.getType())) {
                     List<String> newList = p.getPlayerList() != null ? p.getPlayerList() : Collections.emptyList();
-                    System.out.println("[CrossChatBridge DEBUG] Received PLAYER_UPDATE from " + serverName + ": " + newList);
                     remotePlayerLists.put(serverName, newList);
                     invalidateServerStatus();
                     if (ConfigLoader.isHost() && ConfigLoader.isTabListSyncEnabled()) {
@@ -148,6 +187,8 @@ public class NetworkManager {
                     }
                 }
             }
+        } catch (java.net.SocketTimeoutException e) {
+            System.err.println("[CrossChatBridge] Handshake timeout from " + socket.getRemoteSocketAddress());
         } catch (IOException e) {
             // connection closed
         } finally {
@@ -163,6 +204,7 @@ public class NetworkManager {
                     System.out.println("[CrossChatBridge] Disconnected: " + name);
                 }
             }
+            try { socket.close(); } catch (IOException ignored) {}
         }
     }
 
@@ -182,15 +224,31 @@ public class NetworkManager {
         int port = ConfigLoader.getHostPort();
         try {
             clientSocket = new Socket(host, port);
+            clientSocket.setSoTimeout(10000);
             PrintWriter writer = new PrintWriter(new OutputStreamWriter(clientSocket.getOutputStream(), StandardCharsets.UTF_8), true);
             BufferedReader reader = new BufferedReader(new InputStreamReader(clientSocket.getInputStream(), StandardCharsets.UTF_8));
 
-            ChatPacket reg = new ChatPacket(ChatPacket.TYPE_REGISTER, ConfigLoader.getServerName(), null, null);
-            reg.setKey(ConfigLoader.getSecretHash());
-            writer.write(reg.toJson());
+            ChatPacket hello = new ChatPacket(ChatPacket.TYPE_HELLO, ConfigLoader.getServerName(), null, null);
+            writer.write(hello.toJson());
             writer.flush();
+
+            String challengeLine = reader.readLine();
+            if (challengeLine == null) throw new IOException("No challenge received");
+            ChatPacket challenge = ChatPacket.fromJson(challengeLine);
+            if (!ChatPacket.TYPE_CHALLENGE.equals(challenge.getType())) {
+                throw new IOException("Expected CHALLENGE, got " + challenge.getType());
+            }
+            String nonce = challenge.getKey();
+
+            String response = sha256Concat(ConfigLoader.getSecretHash(), nonce);
+            ChatPacket auth = new ChatPacket(ChatPacket.TYPE_AUTH, ConfigLoader.getServerName(), null, null);
+            auth.setKey(response);
+            writer.write(auth.toJson());
+            writer.flush();
+
+            clientSocket.setSoTimeout(0);
             clientWriter = writer;
-            System.out.println("[CrossChatBridge] Connected to host " + host + ":" + port);
+            System.out.println("[CrossChatBridge] Authenticated with host " + host + ":" + port);
 
             Thread readerThread = new Thread(() -> {
                 try {
@@ -214,7 +272,7 @@ public class NetworkManager {
 
         } catch (IOException e) {
             if (running) {
-                System.err.println("[CrossChatBridge] Failed to connect to host, retrying in 5s...");
+                System.err.println("[CrossChatBridge] Failed to connect/authenticate to host, retrying in 5s...");
                 threadPool.schedule(NetworkManager::startClient, 5, TimeUnit.SECONDS);
             }
         }
@@ -238,10 +296,7 @@ public class NetworkManager {
     public static void sendPlayerUpdate() {
         if (!ConfigLoader.isPlayerListSyncEnabled()) return;
         MinecraftServer server = serverInstance;
-        if (server == null) {
-            System.out.println("[CrossChatBridge DEBUG] sendPlayerUpdate: serverInstance is null, skipping");
-            return;
-        }
+        if (server == null) return;
 
         List<String> names;
         if (ConfigLoader.isHost()) {
@@ -253,7 +308,6 @@ public class NetworkManager {
                 names = new ArrayList<>(localPlayerNames);
             }
         }
-        System.out.println("[CrossChatBridge DEBUG] sendPlayerUpdate: " + ConfigLoader.getServerName() + " -> " + names);
 
         ChatPacket packet = new ChatPacket();
         packet.setType(ChatPacket.TYPE_PLAYER_UPDATE);
@@ -273,12 +327,8 @@ public class NetworkManager {
     }
 
     private static void syncVirtualPlayers(String serverName, List<String> newNames) {
-        System.out.println("[CrossChatBridge] syncVirtualPlayers: " + serverName + " -> " + newNames);
         MinecraftServer server = serverInstance;
-        if (server == null) {
-            System.err.println("[CrossChatBridge] ERROR: serverInstance is null!");
-            return;
-        }
+        if (server == null) return;
         server.execute(() -> {
             List<String> old = serverPlayerNames.remove(serverName);
             if (old != null) {
@@ -286,7 +336,6 @@ public class NetworkManager {
                     UUID id = virtualPlayerUUID(serverName, name);
                     virtualPlayers.remove(id);
                     broadcastPlayerRemove(id);
-                    System.out.println("[CrossChatBridge] Removed virtual player: " + name);
                 }
             }
             if (newNames != null && !newNames.isEmpty()) {
@@ -295,13 +344,9 @@ public class NetworkManager {
                     VirtualPlayerInfo info = new VirtualPlayerInfo(id, name, serverName);
                     virtualPlayers.put(id, info);
                     broadcastPlayerAdd(info);
-                    System.out.println("[CrossChatBridge] Added virtual player: " + name + " from " + serverName);
                 }
                 serverPlayerNames.put(serverName, new ArrayList<>(newNames));
-            } else {
-                System.out.println("[CrossChatBridge] No players in " + serverName + ", cleared.");
             }
-            System.out.println("[CrossChatBridge] Current virtualPlayers count: " + virtualPlayers.size());
         });
     }
 
@@ -330,7 +375,7 @@ public class NetworkManager {
                 info.id, profile, true, 0, GameType.SURVIVAL, displayName, false, 0, null);
         ClientboundPlayerInfoUpdatePacket packet = new ClientboundPlayerInfoUpdatePacket(
                 ADD_ACTIONS, Collections.emptyList());
-        ((com.zxczxc147zxc.crosschat.mixin.ClientboundPlayerInfoUpdatePacketAccessor) packet).setEntries(Collections.singletonList(entry));
+        ((ClientboundPlayerInfoUpdatePacketAccessor) packet).setEntries(Collections.singletonList(entry));
         List<ServerPlayer> players = server.getPlayerList().getPlayers();
         for (ServerPlayer p : players) {
             p.connection.send(packet);
@@ -361,7 +406,7 @@ public class NetworkManager {
                     info.id, profile, true, 0, GameType.SURVIVAL, displayName, false, 0, null);
             ClientboundPlayerInfoUpdatePacket packet = new ClientboundPlayerInfoUpdatePacket(
                     ADD_ACTIONS, Collections.emptyList());
-            ((com.zxczxc147zxc.crosschat.mixin.ClientboundPlayerInfoUpdatePacketAccessor) packet).setEntries(Collections.singletonList(entry));
+            ((ClientboundPlayerInfoUpdatePacketAccessor) packet).setEntries(Collections.singletonList(entry));
             target.connection.send(packet);
         }
     }
