@@ -60,15 +60,19 @@ public class CrossChatMod implements ModInitializer {
         );
 
         ServerPlayerEvents.JOIN.register(player -> {
-            NetworkManager.addLocalPlayer(player.getName().getString());
+            String name = player.getName().getString();
+            NetworkManager.addLocalPlayer(name);
             NetworkManager.sendPlayerUpdate();
-            if (ConfigLoader.isHost() && ConfigLoader.isTabListSyncEnabled()) {
+            NetworkManager.announceJoinLeave(name, true);
+            if (ConfigLoader.isTabListSyncEnabled()) {
                 NetworkManager.sendVirtualPlayersTo(player);
             }
         });
         ServerPlayerEvents.LEAVE.register(player -> {
-            NetworkManager.removeLocalPlayer(player.getName().getString());
+            String name = player.getName().getString();
+            NetworkManager.removeLocalPlayer(name);
             NetworkManager.sendPlayerUpdate();
+            NetworkManager.announceJoinLeave(name, false);
         });
 
         Runtime.getRuntime().addShutdownHook(new Thread(NetworkManager::shutdown));

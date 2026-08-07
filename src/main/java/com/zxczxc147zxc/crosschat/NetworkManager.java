@@ -3,7 +3,10 @@ package com.zxczxc147zxc.crosschat;
 import com.mojang.authlib.GameProfile;
 import com.zxczxc147zxc.crosschat.mixin.ClientboundPlayerInfoUpdatePacketAccessor;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
+import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.MutableComponent;
+import net.minecraft.network.chat.Style;
 import net.minecraft.network.protocol.game.ClientboundPlayerInfoRemovePacket;
 import net.minecraft.network.protocol.game.ClientboundPlayerInfoUpdatePacket;
 import net.minecraft.server.MinecraftServer;
@@ -17,7 +20,6 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.concurrent.*;
 import java.util.*;
-import java.util.stream.Collectors;
 
 public class NetworkManager {
     private static ServerSocket serverSocket;
@@ -165,6 +167,8 @@ public class NetworkManager {
             writerToServer.put(writer, serverName);
             System.out.println("[CrossChatBridge] Registered: " + serverName);
 
+            sendHostPlayerList(writer);
+
             String line;
             while ((line = reader.readLine()) != null) {
                 ChatPacket p = ChatPacket.fromJson(line);
@@ -185,6 +189,8 @@ public class NetworkManager {
                     if (ConfigLoader.isHost() && ConfigLoader.isTabListSyncEnabled()) {
                         syncVirtualPlayers(serverName, newList);
                     }
+                } else if (ChatPacket.TYPE_JOIN.equals(p.getType()) || ChatPacket.TYPE_LEAVE.equals(p.getType())) {
+                    handleJoinLeave(p, writer);
                 }
             }
         } catch (java.net.SocketTimeoutException e) {
@@ -216,6 +222,16 @@ public class NetworkManager {
         for (PrintWriter w : clientWriters.values()) {
             w.write(json);
             w.flush();
+        }
+    }
+
+    private static void forwardToClientsExcept(ChatPacket packet, PrintWriter exclude) {
+        String json = packet.toJson();
+        for (PrintWriter w : clientWriters.values()) {
+            if (w != exclude) {
+                w.write(json);
+                w.flush();
+            }
         }
     }
 
@@ -251,6 +267,7 @@ public class NetworkManager {
             System.out.println("[CrossChatBridge] Authenticated with host " + host + ":" + port);
 
             Thread readerThread = new Thread(() -> {
+                String hostName = null;
                 try {
                     String line;
                     while ((line = reader.readLine()) != null) {
@@ -261,9 +278,25 @@ public class NetworkManager {
                             if (server != null) {
                                 server.execute(() -> server.getPlayerList().broadcastSystemMessage(Component.literal(formatted), false));
                             }
+                        } else if (ChatPacket.TYPE_PLAYER_UPDATE.equals(p.getType())) {
+                            hostName = p.getServer();
+                            List<String> newList = p.getPlayerList() != null ? p.getPlayerList() : Collections.emptyList();
+                            syncVirtualPlayers(hostName, newList);
+                        } else if (ChatPacket.TYPE_JOIN.equals(p.getType()) || ChatPacket.TYPE_LEAVE.equals(p.getType())) {
+                            boolean joined = ChatPacket.TYPE_JOIN.equals(p.getType());
+                            Component message = parseLegacyFormatting(formatJoinLeaveMessage(p.getServer(), p.getPlayer(), joined));
+                            MinecraftServer server = serverInstance;
+                            if (server != null) {
+                                server.execute(() -> server.getPlayerList().broadcastSystemMessage(message, false));
+                            }
                         }
                     }
-                } catch (IOException ignored) {}
+                } catch (IOException ignored) {
+                } finally {
+                    if (hostName != null) {
+                        removeVirtualPlayersForServer(hostName);
+                    }
+                }
             });
             readerThread.setDaemon(true);
             readerThread.start();
@@ -285,6 +318,90 @@ public class NetworkManager {
         }
     }
 
+    private static String formatJoinLeaveMessage(String serverName, String playerName, boolean joined) {
+        String template = joined ? ConfigLoader.getJoinMessage() : ConfigLoader.getLeaveMessage();
+        return template
+                .replace("{player}", playerName == null ? "" : playerName)
+                .replace("{server_name}", serverName == null ? "" : serverName);
+    }
+
+    private static Component parseLegacyFormatting(String text) {
+        MutableComponent root = Component.empty();
+        Style style = Style.EMPTY;
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (c == '\u00a7' && i + 1 < text.length()) {
+                if (sb.length() > 0) {
+                    root.append(Component.literal(sb.toString()).withStyle(style));
+                    sb.setLength(0);
+                }
+                style = applyLegacyCode(style, ChatFormatting.getByCode(text.charAt(i + 1)));
+                i++;
+            } else {
+                sb.append(c);
+            }
+        }
+        if (sb.length() > 0) {
+            root.append(Component.literal(sb.toString()).withStyle(style));
+        }
+        return root;
+    }
+
+    private static Style applyLegacyCode(Style style, ChatFormatting fmt) {
+        if (fmt == null) return style;
+        if (fmt == ChatFormatting.RESET) return Style.EMPTY;
+        if (fmt.ordinal() <= ChatFormatting.WHITE.ordinal()) {
+            return style.withColor(fmt);
+        }
+        switch (fmt) {
+            case BOLD: return style.withBold(true);
+            case ITALIC: return style.withItalic(true);
+            case UNDERLINE: return style.withUnderlined(true);
+            case STRIKETHROUGH: return style.withStrikethrough(true);
+            case OBFUSCATED: return style.withObfuscated(true);
+            default: return style;
+        }
+    }
+
+    private static void handleJoinLeave(ChatPacket p, PrintWriter origin) {
+        boolean joined = ChatPacket.TYPE_JOIN.equals(p.getType());
+        Component message = parseLegacyFormatting(formatJoinLeaveMessage(p.getServer(), p.getPlayer(), joined));
+        MinecraftServer server = serverInstance;
+        if (server != null) {
+            server.execute(() -> server.getPlayerList().broadcastSystemMessage(message, false));
+        }
+        forwardToClientsExcept(p, origin);
+    }
+
+    public static void announceJoinLeave(String playerName, boolean joined) {
+        if (!running) return;
+        ChatPacket packet = new ChatPacket(
+                joined ? ChatPacket.TYPE_JOIN : ChatPacket.TYPE_LEAVE,
+                ConfigLoader.getServerName(), playerName, null);
+        if (ConfigLoader.isHost()) {
+            broadcastToClients(packet);
+        } else {
+            sendToHost(packet);
+        }
+    }
+
+    private static void sendHostPlayerList(PrintWriter writer) {
+        if (!ConfigLoader.isPlayerListSyncEnabled()) return;
+        MinecraftServer server = serverInstance;
+        if (server == null) return;
+        List<String> names;
+        synchronized (localPlayerNames) {
+            names = new ArrayList<>(localPlayerNames);
+        }
+        ChatPacket packet = new ChatPacket();
+        packet.setType(ChatPacket.TYPE_PLAYER_UPDATE);
+        packet.setServer(ConfigLoader.getServerName());
+        packet.setPlayerList(names);
+        writer.write(packet.toJson());
+        writer.flush();
+    }
+
     public static void addLocalPlayer(String name) {
         localPlayerNames.add(name);
     }
@@ -299,14 +416,8 @@ public class NetworkManager {
         if (server == null) return;
 
         List<String> names;
-        if (ConfigLoader.isHost()) {
-            names = server.getPlayerList().getPlayers().stream()
-                .map(p -> p.getName().getString())
-                .collect(Collectors.toList());
-        } else {
-            synchronized (localPlayerNames) {
-                names = new ArrayList<>(localPlayerNames);
-            }
+        synchronized (localPlayerNames) {
+            names = new ArrayList<>(localPlayerNames);
         }
 
         ChatPacket packet = new ChatPacket();
@@ -317,8 +428,24 @@ public class NetworkManager {
         if (ConfigLoader.isHost()) {
             remotePlayerLists.put(ConfigLoader.getServerName(), names);
             invalidateServerStatus();
+            String json = packet.toJson();
+            for (PrintWriter w : clientWriters.values()) {
+                w.write(json);
+                w.flush();
+            }
         } else {
             sendToHost(packet);
+        }
+    }
+
+    public static void refreshLocalPlayers() {
+        MinecraftServer server = serverInstance;
+        if (server == null) return;
+        synchronized (localPlayerNames) {
+            localPlayerNames.clear();
+            for (ServerPlayer p : server.getPlayerList().getPlayers()) {
+                localPlayerNames.add(p.getName().getString());
+            }
         }
     }
 
@@ -448,6 +575,7 @@ public class NetworkManager {
             return t;
         });
         running = true;
+        refreshLocalPlayers();
         if (ConfigLoader.isHost()) {
             startServer();
         } else {

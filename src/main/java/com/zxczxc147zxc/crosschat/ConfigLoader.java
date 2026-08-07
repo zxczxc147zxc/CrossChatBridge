@@ -79,7 +79,9 @@ public class ConfigLoader {
                 props.setProperty("secret", "123456");
                 props.setProperty("sync.playerlist.enabled", "true");
                 props.setProperty("sync.tablist.enabled", "true");
-                props.store(writer, "CrossChat Config\n# 如果通过公共互联网使用，请将其更改为强密码以防止未经授权的连接");
+                props.setProperty("message.join", "[{server_name}] §e{player} 加入了游戏");
+                props.setProperty("message.leave", "[{server_name}] §e{player} 退出了游戏");
+                props.store(writer, "CrossChat Config\n# 如果通过公共互联网使用，请将其更改为强密码以防止未经授权的连接\n# message.join / message.leave 支持占位符: {player} 玩家名, {server_name} 服务器名");
             }
         } catch (IOException e) {
             throw new RuntimeException("Failed to create default config", e);
@@ -112,6 +114,18 @@ public class ConfigLoader {
 
     public static boolean isTabListSyncEnabled() {
         return Boolean.parseBoolean(props.getProperty("sync.tablist.enabled", "true"));
+    }
+
+    public static String getJoinMessage() {
+        String msg = props.getProperty("message.join");
+        if (msg == null || msg.isEmpty()) return "[{server_name}] §e{player} 加入了游戏";
+        return msg;
+    }
+
+    public static String getLeaveMessage() {
+        String msg = props.getProperty("message.leave");
+        if (msg == null || msg.isEmpty()) return "[{server_name}] §e{player} 退出了游戏";
+        return msg;
     }
 
     public static String getSecretHash() {

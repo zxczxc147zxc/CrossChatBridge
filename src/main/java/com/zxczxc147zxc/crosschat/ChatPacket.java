@@ -10,6 +10,8 @@ public class ChatPacket {
     public static final String TYPE_HELLO = "HELLO";
     public static final String TYPE_CHALLENGE = "CHALLENGE";
     public static final String TYPE_AUTH = "AUTH";
+    public static final String TYPE_JOIN = "JOIN";
+    public static final String TYPE_LEAVE = "LEAVE";
 
     private static final Gson GSON = new Gson();
 
