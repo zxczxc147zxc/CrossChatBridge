@@ -380,7 +380,7 @@ public class NetworkManager {
                 joined ? ChatPacket.TYPE_JOIN : ChatPacket.TYPE_LEAVE,
                 ConfigLoader.getServerName(), playerName, null);
         if (ConfigLoader.isHost()) {
-            broadcastToClients(packet);
+            forwardToClientsExcept(packet, null);
         } else {
             sendToHost(packet);
         }
