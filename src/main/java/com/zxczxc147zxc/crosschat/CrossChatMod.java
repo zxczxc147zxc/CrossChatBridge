@@ -2,13 +2,12 @@ package com.zxczxc147zxc.crosschat;
 
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
-import net.fabricmc.fabric.api.entity.event.v1.ServerPlayerEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.message.v1.ServerMessageEvents;
-import net.minecraft.network.chat.Component;
-import net.minecraft.server.MinecraftServer;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
+import net.minecraft.network.chat.Component;
+import net.minecraft.server.MinecraftServer;
 
 public class CrossChatMod implements ModInitializer {
     private static MinecraftServer server;
@@ -48,7 +47,7 @@ public class CrossChatMod implements ModInitializer {
         CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) ->
             dispatcher.register(Commands.literal("crosschat")
                 .then(Commands.literal("reload")
-                    .requires(Commands.hasPermission(Commands.LEVEL_ADMINS))
+                    .requires(PermissionCompat::isAdmin)
                     .executes(context -> {
                         ConfigLoader.load();
                         NetworkManager.reload();
@@ -58,22 +57,6 @@ public class CrossChatMod implements ModInitializer {
                 )
             )
         );
-
-        ServerPlayerEvents.JOIN.register(player -> {
-            String name = player.getName().getString();
-            NetworkManager.addLocalPlayer(name);
-            NetworkManager.sendPlayerUpdate();
-            NetworkManager.announceJoinLeave(name, true);
-            if (ConfigLoader.isTabListSyncEnabled()) {
-                NetworkManager.sendVirtualPlayersTo(player);
-            }
-        });
-        ServerPlayerEvents.LEAVE.register(player -> {
-            String name = player.getName().getString();
-            NetworkManager.removeLocalPlayer(name);
-            NetworkManager.sendPlayerUpdate();
-            NetworkManager.announceJoinLeave(name, false);
-        });
 
         Runtime.getRuntime().addShutdownHook(new Thread(NetworkManager::shutdown));
     }

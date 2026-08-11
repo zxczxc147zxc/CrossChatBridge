@@ -3,6 +3,8 @@ package com.zxczxc147zxc.crosschat;
 import com.mojang.authlib.GameProfile;
 import com.zxczxc147zxc.crosschat.mixin.ClientboundPlayerInfoUpdatePacketAccessor;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
+import net.fabricmc.loader.api.FabricLoader;
+import net.fabricmc.loader.api.MappingResolver;
 import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
@@ -41,16 +43,28 @@ public class NetworkManager {
     private static final Map<UUID, VirtualPlayerInfo> virtualPlayers = new ConcurrentHashMap<>();
     private static final Map<String, List<String>> serverPlayerNames = new ConcurrentHashMap<>();
 
-    private static final EnumSet<ClientboundPlayerInfoUpdatePacket.Action> ADD_ACTIONS = EnumSet.of(
-            ClientboundPlayerInfoUpdatePacket.Action.ADD_PLAYER,
-            ClientboundPlayerInfoUpdatePacket.Action.INITIALIZE_CHAT,
-            ClientboundPlayerInfoUpdatePacket.Action.UPDATE_GAME_MODE,
-            ClientboundPlayerInfoUpdatePacket.Action.UPDATE_LISTED,
-            ClientboundPlayerInfoUpdatePacket.Action.UPDATE_LATENCY,
-            ClientboundPlayerInfoUpdatePacket.Action.UPDATE_DISPLAY_NAME,
-            ClientboundPlayerInfoUpdatePacket.Action.UPDATE_HAT,
-            ClientboundPlayerInfoUpdatePacket.Action.UPDATE_LIST_ORDER
-    );
+    private static final EnumSet<ClientboundPlayerInfoUpdatePacket.Action> ADD_ACTIONS = buildAddActions();
+
+    private static EnumSet<ClientboundPlayerInfoUpdatePacket.Action> buildAddActions() {
+        EnumSet<ClientboundPlayerInfoUpdatePacket.Action> set = EnumSet.of(
+                ClientboundPlayerInfoUpdatePacket.Action.ADD_PLAYER,
+                ClientboundPlayerInfoUpdatePacket.Action.INITIALIZE_CHAT,
+                ClientboundPlayerInfoUpdatePacket.Action.UPDATE_GAME_MODE,
+                ClientboundPlayerInfoUpdatePacket.Action.UPDATE_LISTED,
+                ClientboundPlayerInfoUpdatePacket.Action.UPDATE_LATENCY,
+                ClientboundPlayerInfoUpdatePacket.Action.UPDATE_DISPLAY_NAME
+        );
+        addActionIfPresent(set, "UPDATE_HAT");
+        addActionIfPresent(set, "UPDATE_LIST_ORDER");
+        return set;
+    }
+
+    private static void addActionIfPresent(EnumSet<ClientboundPlayerInfoUpdatePacket.Action> set, String name) {
+        try {
+            set.add(ClientboundPlayerInfoUpdatePacket.Action.valueOf(name));
+        } catch (Throwable ignored) {
+        }
+    }
 
     public static class VirtualPlayerInfo {
         public final UUID id;
@@ -498,8 +512,8 @@ public class NetworkManager {
         GameProfile profile = new GameProfile(info.id, info.rawName);
         Component displayName = info.displayName();
         if (displayName == null) displayName = Component.literal(info.rawName);
-        ClientboundPlayerInfoUpdatePacket.Entry entry = new ClientboundPlayerInfoUpdatePacket.Entry(
-                info.id, profile, true, 0, GameType.SURVIVAL, displayName, false, 0, null);
+        ClientboundPlayerInfoUpdatePacket.Entry entry = createEntry(info.id, profile, displayName);
+        if (entry == null) return;
         ClientboundPlayerInfoUpdatePacket packet = new ClientboundPlayerInfoUpdatePacket(
                 ADD_ACTIONS, Collections.emptyList());
         ((ClientboundPlayerInfoUpdatePacketAccessor) packet).setEntries(Collections.singletonList(entry));
@@ -512,6 +526,42 @@ public class NetworkManager {
                 p.connection.send(packet);
             }
         });
+    }
+
+    @SuppressWarnings("unchecked")
+    private static ClientboundPlayerInfoUpdatePacket.Entry createEntry(UUID id, GameProfile profile, Component displayName) {
+        try {
+            MappingResolver resolver = FabricLoader.getInstance().getMappingResolver();
+            String entryOfficial = "net.minecraft.network.protocol.game.ClientboundPlayerInfoUpdatePacket$Entry";
+            String mappedEntry = resolver.mapClassName("official", entryOfficial);
+            String entryName = (mappedEntry == null || mappedEntry.isEmpty()) ? entryOfficial : mappedEntry;
+            Class<?> entryCls = Class.forName(entryName);
+
+            String chatSessionOfficial = "net.minecraft.network.chat.ChatSession";
+            String mappedChat = resolver.mapClassName("official", chatSessionOfficial);
+            String chatName = (mappedChat == null || mappedChat.isEmpty()) ? chatSessionOfficial : mappedChat;
+            Class<?> chatCls = Class.forName(chatName);
+
+            Object entry = null;
+            try {
+                entry = entryCls.getConstructor(UUID.class, GameProfile.class, boolean.class, int.class,
+                        GameType.class, Component.class, boolean.class, int.class, chatCls)
+                        .newInstance(id, profile, true, 0, GameType.SURVIVAL, displayName, false, 0, null);
+            } catch (NoSuchMethodException e) {
+                try {
+                    entry = entryCls.getConstructor(UUID.class, GameProfile.class, boolean.class, int.class,
+                            GameType.class, Component.class, boolean.class, chatCls)
+                            .newInstance(id, profile, true, 0, GameType.SURVIVAL, displayName, false, null);
+                } catch (NoSuchMethodException e2) {
+                    entry = entryCls.getConstructor(UUID.class, GameProfile.class, boolean.class, int.class,
+                            GameType.class, Component.class, chatCls)
+                            .newInstance(id, profile, true, 0, GameType.SURVIVAL, displayName, null);
+                }
+            }
+            return (ClientboundPlayerInfoUpdatePacket.Entry) entry;
+        } catch (Throwable t) {
+            return null;
+        }
     }
 
     private static void broadcastPlayerRemove(UUID id) {
@@ -529,8 +579,8 @@ public class NetworkManager {
             GameProfile profile = new GameProfile(info.id, info.rawName);
             Component displayName = info.displayName();
             if (displayName == null) displayName = Component.literal(info.rawName);
-            ClientboundPlayerInfoUpdatePacket.Entry entry = new ClientboundPlayerInfoUpdatePacket.Entry(
-                    info.id, profile, true, 0, GameType.SURVIVAL, displayName, false, 0, null);
+            ClientboundPlayerInfoUpdatePacket.Entry entry = createEntry(info.id, profile, displayName);
+            if (entry == null) continue;
             ClientboundPlayerInfoUpdatePacket packet = new ClientboundPlayerInfoUpdatePacket(
                     ADD_ACTIONS, Collections.emptyList());
             ((ClientboundPlayerInfoUpdatePacketAccessor) packet).setEntries(Collections.singletonList(entry));
